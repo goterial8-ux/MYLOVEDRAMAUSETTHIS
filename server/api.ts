@@ -11,7 +11,7 @@ const baseGuidelines = '';
 // Initialize SDK lazily
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
-  const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true';
+  const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI?.toLowerCase() === 'true';
   const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.VERTEX_PROJECT_ID;
   const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.VERTEX_LOCATION || 'global';
   
@@ -67,28 +67,41 @@ function isRetryableError(e: any): boolean {
    return true;
 }
 
-async function generateContentWithFallback(contents: any, config: any, models: string[]) {
+async function generateContentWithFallback(contents: any, config: any, models: string[], res?: Response) {
   const ai = getGenAI();
   
-  for (const model of models) {
-     console.log(`[Vertex AI] Trying model: ${model}`);
-     try {
-       const response = await ai.models.generateContent({
-         model,
-         contents,
-         config
-       });
-       console.log(`[Vertex AI] Success with model: ${model}`);
-       return response;
-     } catch (e: any) {
-       console.log(`[Vertex AI] Error with model ${model}:`, e.message);
-       if (model === models[models.length - 1] || !isRetryableError(e)) {
-           throw e;
-       }
-       console.log("Falling back to next model...");
-     }
+  let interval: NodeJS.Timeout | undefined;
+  if (res) {
+    res.setHeader('Content-Type', 'application/json');
+    res.write(' ');
+    interval = setInterval(() => { res.write(' '); }, 15000);
   }
-  throw new Error("All fallbacks exhausted");
+
+  try {
+    for (const model of models) {
+       console.log(`[Vertex AI] Trying model: ${model}`);
+       try {
+         const response = await ai.models.generateContent({
+           model,
+           contents,
+           config
+         });
+         console.log(`[Vertex AI] Success with model: ${model}`);
+         if (interval) clearInterval(interval);
+         return response;
+       } catch (e: any) {
+         console.log(`[Vertex AI] Error with model ${model}:`, e.message);
+         if (model === models[models.length - 1] || !isRetryableError(e)) {
+             throw e;
+         }
+         console.log("Falling back to next model...");
+       }
+    }
+    throw new Error("All fallbacks exhausted");
+  } catch (err) {
+    if (interval) clearInterval(interval);
+    throw err;
+  }
 }
 
 router.post('/generate/setup', async (req: Request, res: Response): Promise<void> => {
@@ -106,14 +119,21 @@ router.post('/generate/setup', async (req: Request, res: Response): Promise<void
         responseSchema: ideaSetupSchema,
         temperature: 0.7,
       },
-      ['gemini-2.5-pro']
+      ['gemini-2.5-pro'],
+      res
     );
 
     const ideaSetupData = JSON.parse(ideaSetupResponse.text || '{}');
-    res.json(ideaSetupData);
+    res.write(JSON.stringify(ideaSetupData));
+    res.end();
   } catch (error: any) {
     console.error(error);
-    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    } else {
+      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+      res.end();
+    }
   }
 });
 
@@ -124,7 +144,7 @@ router.post('/generate/foundation', async (req: Request, res: Response): Promise
     if (!rawIdea) { res.status(400).json({ error: 'Missing rawIdea' }); return; }
     if (!ideaSetupData) { res.status(400).json({ error: 'Missing ideaSetupData' }); return; }
 
-    // Step 2: Execute 01 FOUNDATION DNA -> Gemini 3.5 Flash
+    // Step 2: Execute 01 FOUNDATION DNA -> Gemini 2.5 Pro
     let promptText01 = `RAW IDEA: "${rawIdea}"\n\n`;
     promptText01 += `00 IDEA SETUP HANDOFF PACKAGE:\n${JSON.stringify(ideaSetupData.handoffPackageToStage01, null, 2)}\n\n`;
 
@@ -136,14 +156,21 @@ router.post('/generate/foundation', async (req: Request, res: Response): Promise
         responseSchema: foundationDnaSchema,
         temperature: 0.7,
       },
-      ['gemini-3.5-flash']
+      ['gemini-2.5-pro'],
+      res
     );
 
     const data01 = JSON.parse(response01.text || '{}');
-    res.json(data01);
+    res.write(JSON.stringify(data01));
+    res.end();
   } catch (error: any) {
     console.error(error);
-    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    } else {
+      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+      res.end();
+    }
   }
 });
 
@@ -159,17 +186,23 @@ router.post('/generate/outline', async (req: Request, res: Response): Promise<vo
         systemInstruction: MACRO_OUTLINE_PROMPT,
         responseMimeType: 'application/json',
         responseSchema: macroOutlineSchema,
-        temperature: 0.7,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
+        temperature: 0.7
       },
-      ['gemini-3.1-pro-preview']
+      ['gemini-2.5-pro'],
+      res
     );
 
     const data = JSON.parse(response.text || '{}');
-    res.json(data);
+    res.write(JSON.stringify(data));
+    res.end();
   } catch (error: any) {
     console.error(error);
-    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    } else {
+      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+      res.end();
+    }
   }
 });
 
@@ -189,14 +222,21 @@ router.post('/generate/scenes', async (req: Request, res: Response): Promise<voi
           responseSchema: sceneCardsSchema,
           temperature: 0.7,
         },
-        ['gemini-3.5-flash']
+        ['gemini-2.5-pro'],
+        res
       );
   
       const data = JSON.parse(response.text || '{}');
-      res.json(data);
+      res.write(JSON.stringify(data));
+      res.end();
     } catch (error: any) {
       console.error(error);
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      } else {
+        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+        res.end();
+      }
     }
 });
 
@@ -219,16 +259,22 @@ router.post('/generate/script-part', async (req: Request, res: Response): Promis
         promptText,
         {
           systemInstruction: FINAL_SCRIPT_PROMPT,
-          temperature: 0.75,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
+          temperature: 0.75
         },
-        ['gemini-3.1-pro-preview']
+        ['gemini-2.5-pro'],
+        res
       );
   
-      res.json({ content: response.text });
+      res.write(JSON.stringify({ content: response.text }));
+      res.end();
     } catch (error: any) {
       console.error(error);
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      } else {
+        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+        res.end();
+      }
     }
 });
 
@@ -243,16 +289,22 @@ router.post('/generate/qa', async (req: Request, res: Response): Promise<void> =
         promptText,
         {
           systemInstruction: LINTER_QA_PROMPT,
-          temperature: 0.2,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
+          temperature: 0.2
         },
-        ['gemini-3.1-pro-preview']
+        ['gemini-2.5-pro'],
+        res
       );
   
-      res.json({ content: response.text });
+      res.write(JSON.stringify({ content: response.text }));
+      res.end();
     } catch (error: any) {
       console.error(error);
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+      } else {
+        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+        res.end();
+      }
     }
 });
 
@@ -295,27 +347,32 @@ ${isJson ? 'You MUST output in the exact same JSON schema structure as the origi
       config.responseSchema = schema;
     }
 
-    let revisionModels = ['gemini-3.1-pro-preview'];
+    let revisionModels = ['gemini-2.5-pro'];
     if (stage === 'foundation' || stage === 'scenes') {
-      revisionModels = ['gemini-3.5-flash'];
-    } else {
-      config.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
+      revisionModels = ['gemini-2.5-pro'];
     }
 
     const response = await generateContentWithFallback(
       systemInstruction,
       config,
-      revisionModels
+      revisionModels,
+      res
     );
 
     if (isJson) {
-      res.json(JSON.parse(response.text || '{}'));
+      res.write(JSON.stringify(JSON.parse(response.text || '{}')));
     } else {
-      res.json({ content: response.text });
+      res.write(JSON.stringify({ content: response.text }));
     }
+    res.end();
   } catch (error: any) {
     console.error("Revise error", error);
-    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
+    } else {
+      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
+      res.end();
+    }
   }
 });
 

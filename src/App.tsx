@@ -18,7 +18,7 @@ async function fetchJson(url: string, options: RequestInit) {
     console.error("Backend returned non-JSON:", raw);
     throw new Error("Backend returned HTML/non-JSON. Check API route.");
   }
-  if (!response.ok) {
+  if (!response.ok || data.error) {
      throw new Error(data.error || "Generation failed");
   }
   return data;

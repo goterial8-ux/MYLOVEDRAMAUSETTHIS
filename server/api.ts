@@ -70,25 +70,32 @@ function isRetryableError(e: any): boolean {
 async function generateContentWithFallback(contents: any, config: any, models: string[], res?: Response) {
   const ai = getGenAI();
   
-  let interval: NodeJS.Timeout | undefined;
-  if (res) {
+  if (res && !res.headersSent) {
     res.setHeader('Content-Type', 'application/json');
     res.write(' ');
-    interval = setInterval(() => { res.write(' '); }, 15000);
   }
 
   try {
     for (const model of models) {
        console.log(`[Vertex AI] Trying model: ${model}`);
        try {
-         const response = await ai.models.generateContent({
+         const responseStream = await ai.models.generateContentStream({
            model,
            contents,
            config
          });
+         
+         let fullText = "";
+         for await (const chunk of responseStream) {
+           if (chunk.text) {
+             fullText += chunk.text;
+             if (res) {
+               res.write(' '); // Keep connection alive
+             }
+           }
+         }
          console.log(`[Vertex AI] Success with model: ${model}`);
-         if (interval) clearInterval(interval);
-         return response;
+         return { text: fullText };
        } catch (e: any) {
          console.log(`[Vertex AI] Error with model ${model}:`, e.message);
          if (model === models[models.length - 1] || !isRetryableError(e)) {
@@ -99,7 +106,6 @@ async function generateContentWithFallback(contents: any, config: any, models: s
     }
     throw new Error("All fallbacks exhausted");
   } catch (err) {
-    if (interval) clearInterval(interval);
     throw err;
   }
 }

@@ -8,6 +8,8 @@ const router = Router();
 
 const baseGuidelines = '';
 
+const RUSSIAN_CONSTRAINT = `\n\n=== ВАЖНО: ЯЗЫКОВОЙ БАРЬЕР ===\nВЕСЬ ВАШ ОТВЕТ И ВЕСЬ ГЕНЕРИРУЕМЫЙ ТЕКСТ (СЦЕНАРИИ, КАРТОЧКИ СЦЕН, ДНК ИСТОРИИ, ETC) ДОЛЖЕН БЫТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ! ЭТО КРИТИЧЕСКОЕ ТРЕБОВАНИЕ. ВЫ ДОЛЖНЫ ТОЧНО СЛЕДОВАТЬ ШАБЛОНАМ И ПРИМЕРАМ ИЗ ИНСТРУКЦИИ И НАПОЛНЯТЬ ИХ ГЛУБИНОЙ И ДЕТАЛЯМИ, КАК В ОРИГИНАЛЬНОМ ПРИМЕРЕ.`;
+
 // Initialize SDK lazily
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -69,33 +71,19 @@ function isRetryableError(e: any): boolean {
 
 async function generateContentWithFallback(contents: any, config: any, models: string[], res?: Response) {
   const ai = getGenAI();
-  
-  if (res && !res.headersSent) {
-    res.setHeader('Content-Type', 'application/json');
-    res.write(' ');
-  }
 
   try {
     for (const model of models) {
        console.log(`[Vertex AI] Trying model: ${model}`);
        try {
-         const responseStream = await ai.models.generateContentStream({
+         const response = await ai.models.generateContent({
            model,
            contents,
            config
          });
          
-         let fullText = "";
-         for await (const chunk of responseStream) {
-           if (chunk.text) {
-             fullText += chunk.text;
-             if (res) {
-               res.write(' '); // Keep connection alive
-             }
-           }
-         }
          console.log(`[Vertex AI] Success with model: ${model}`);
-         return { text: fullText };
+         return response;
        } catch (e: any) {
          console.log(`[Vertex AI] Error with model ${model}:`, e.message);
          if (model === models[models.length - 1] || !isRetryableError(e)) {
@@ -120,7 +108,7 @@ router.post('/generate/setup', async (req: Request, res: Response): Promise<void
     const ideaSetupResponse = await generateContentWithFallback(
       `RAW IDEA:\n"${rawIdea}"`,
       {
-        systemInstruction: SETUP_PROMPT,
+        systemInstruction: SETUP_PROMPT + RUSSIAN_CONSTRAINT,
         responseMimeType: 'application/json',
         responseSchema: ideaSetupSchema,
         temperature: 0.7,
@@ -130,16 +118,10 @@ router.post('/generate/setup', async (req: Request, res: Response): Promise<void
     );
 
     const ideaSetupData = JSON.parse(ideaSetupResponse.text || '{}');
-    res.write(JSON.stringify(ideaSetupData));
-    res.end();
+    res.json(ideaSetupData);
   } catch (error: any) {
     console.error(error);
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-    } else {
-      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-      res.end();
-    }
+    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
   }
 });
 
@@ -157,7 +139,7 @@ router.post('/generate/foundation', async (req: Request, res: Response): Promise
     const response01 = await generateContentWithFallback(
       promptText01,
       {
-        systemInstruction: FOUNDATION_PROMPT,
+        systemInstruction: FOUNDATION_PROMPT + RUSSIAN_CONSTRAINT,
         responseMimeType: 'application/json',
         responseSchema: foundationDnaSchema,
         temperature: 0.7,
@@ -167,16 +149,10 @@ router.post('/generate/foundation', async (req: Request, res: Response): Promise
     );
 
     const data01 = JSON.parse(response01.text || '{}');
-    res.write(JSON.stringify(data01));
-    res.end();
+    res.json(data01);
   } catch (error: any) {
     console.error(error);
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-    } else {
-      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-      res.end();
-    }
+    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
   }
 });
 
@@ -189,7 +165,7 @@ router.post('/generate/outline', async (req: Request, res: Response): Promise<vo
     const response = await generateContentWithFallback(
       promptText,
       {
-        systemInstruction: MACRO_OUTLINE_PROMPT,
+        systemInstruction: MACRO_OUTLINE_PROMPT + RUSSIAN_CONSTRAINT,
         responseMimeType: 'application/json',
         responseSchema: macroOutlineSchema,
         temperature: 0.7
@@ -199,16 +175,10 @@ router.post('/generate/outline', async (req: Request, res: Response): Promise<vo
     );
 
     const data = JSON.parse(response.text || '{}');
-    res.write(JSON.stringify(data));
-    res.end();
+    res.json(data);
   } catch (error: any) {
     console.error(error);
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-    } else {
-      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-      res.end();
-    }
+    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
   }
 });
 
@@ -223,7 +193,7 @@ router.post('/generate/scenes', async (req: Request, res: Response): Promise<voi
       const response = await generateContentWithFallback(
         promptText,
         {
-          systemInstruction: SCENE_CARDS_PROMPT,
+          systemInstruction: SCENE_CARDS_PROMPT + RUSSIAN_CONSTRAINT,
           responseMimeType: 'application/json',
           responseSchema: sceneCardsSchema,
           temperature: 0.7,
@@ -233,16 +203,10 @@ router.post('/generate/scenes', async (req: Request, res: Response): Promise<voi
       );
   
       const data = JSON.parse(response.text || '{}');
-      res.write(JSON.stringify(data));
-      res.end();
+      res.json(data);
     } catch (error: any) {
       console.error(error);
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-      } else {
-        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-        res.end();
-      }
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
     }
 });
 
@@ -264,23 +228,17 @@ router.post('/generate/script-part', async (req: Request, res: Response): Promis
       const response = await generateContentWithFallback(
         promptText,
         {
-          systemInstruction: FINAL_SCRIPT_PROMPT,
+          systemInstruction: FINAL_SCRIPT_PROMPT + RUSSIAN_CONSTRAINT,
           temperature: 0.75
         },
         ['gemini-2.5-pro'],
         res
       );
   
-      res.write(JSON.stringify({ content: response.text }));
-      res.end();
+      res.json({ content: response.text });
     } catch (error: any) {
       console.error(error);
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-      } else {
-        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-        res.end();
-      }
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
     }
 });
 
@@ -294,23 +252,17 @@ router.post('/generate/qa', async (req: Request, res: Response): Promise<void> =
       const response = await generateContentWithFallback(
         promptText,
         {
-          systemInstruction: LINTER_QA_PROMPT,
+          systemInstruction: LINTER_QA_PROMPT + RUSSIAN_CONSTRAINT,
           temperature: 0.2
         },
         ['gemini-2.5-pro'],
         res
       );
   
-      res.write(JSON.stringify({ content: response.text }));
-      res.end();
+      res.json({ content: response.text });
     } catch (error: any) {
       console.error(error);
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-      } else {
-        res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-        res.end();
-      }
+      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
     }
 });
 
@@ -345,7 +297,8 @@ Current Data:
 ${typeof currentData === 'string' ? currentData : JSON.stringify(currentData, null, 2)}
 
 Carefully apply the user's instructions to the Current Data. Rewrite the data to incorporate the requested changes while maintaining the original parts that were not asked to be changed.
-${isJson ? 'You MUST output in the exact same JSON schema structure as the original data.' : 'Output only the revised text.'}`;
+${isJson ? 'You MUST output in the exact same JSON schema structure as the original data.' : 'Output only the revised text.'}
+${RUSSIAN_CONSTRAINT}`;
 
     const config: any = { temperature: 0.7 };
     if (isJson) {
@@ -366,19 +319,13 @@ ${isJson ? 'You MUST output in the exact same JSON schema structure as the origi
     );
 
     if (isJson) {
-      res.write(JSON.stringify(JSON.parse(response.text || '{}')));
+      res.json(JSON.parse(response.text || '{}'));
     } else {
-      res.write(JSON.stringify({ content: response.text }));
+      res.json({ content: response.text });
     }
-    res.end();
   } catch (error: any) {
     console.error("Revise error", error);
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error.message || 'Generation failed' });
-    } else {
-      res.write(JSON.stringify({ success: false, error: error.message || 'Generation failed' }));
-      res.end();
-    }
+    res.status(500).json({ success: false, error: error.message || 'Generation failed' });
   }
 });
 
